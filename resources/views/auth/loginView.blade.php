@@ -18,7 +18,7 @@
             </div>
         @endif
 
-        <form method="POST" action="{{ route('auth.loginView') }}" class="space-y-4">
+        <form method="POST" action="{{ route('login.submit') }}" class="space-y-4">
             @csrf
 
             <div>
@@ -49,7 +49,7 @@
 
         <p class="text-gray-400 text-center mt-6">
             Don't have an account?
-            <a href="{{ route('auth.registrationView') }}" class="text-blue-400 hover:text-blue-300">Sign up</a>
+            <a href="{{ route('register') }}" class="text-blue-400 hover:text-blue-300">Sign up</a>
         </p>
     </div>
 </body>

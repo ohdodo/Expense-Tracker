@@ -23,7 +23,7 @@
     <div class="w-full max-w-md bg-gray-900 rounded-lg shadow-md p-8">
         <h1 class="text-2xl font-bold text-white text-center mb-6">Create Account</h1>
 
-        <form method="POST" action="{{ route('auth.registrationView')}}" class="space-y-4">
+        <form method="POST" action="{{ route('register.submit')}}" class="space-y-4">
             @csrf
             <!-- Full Name -->
             <div>
