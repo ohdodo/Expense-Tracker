@@ -1,76 +1,129 @@
 <?php
 
 namespace App\Http\Controllers;
+
 use Illuminate\Http\Request;
-// use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
 use App\Models\User;
-use Illuminate\Support\Facades\Session;
-use Illuminate\Support\Facades\Auth; // add this at top if not already
-
-// inside login()
-
-
-
+use Illuminate\Support\Facades\Validator;
 
 class AuthController extends Controller
 {
-
-
-    public function showRegistrationForm()
+    /**
+     * Check if user is authenticated
+     * 
+     * @return \Illuminate\Http\RedirectResponse|null
+     */
+    public static function checkAuth()
     {
-        return view('auth.registrationView');
+        if (!User::isLoggedIn()) {
+            return redirect()->route('login')->with('error', 'Please login to access this page.');
+        }
+        return null;
+    }
+    
+    /**
+     * Get the current authenticated user
+     * 
+     * @return \App\Models\User|null
+     */
+    public static function getCurrentUser()
+    {
+        return User::getCurrentUser();
+    }
+    
+    /**
+     * Redirect if already authenticated
+     * 
+     * @return \Illuminate\Http\RedirectResponse|null
+     */
+    protected function redirectIfAuthenticated()
+    {
+        if (User::isLoggedIn()) {
+            return redirect()->route('expenses.index');
+        }
+        return null;
     }
 
     public function showLoginForm()
     {
-        return view('auth.loginView');
-    }
-
-    public function showHomePage()
-    {
-        return view('home');
-    }
-
-    public function registration(Request $request)
-    {
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8',
-            'confirm_password' => 'required|string|min:8',
-        ]);
-
-        if ($request->password == $request->confirm_password) {
-            $save = User::insert([
-                'name' => $request->name,
-                'email' => $request->email,
-                'password' => Hash::make($request->password),
-            ]);
-
-            return redirect()->route('login')->with('success', 'Registration successful. Please login.');
-        } else {
-            return redirect()->back()->withErrors(['password' => 'Passwords do not match.']);
+        // Redirect if already logged in
+        if ($redirect = $this->redirectIfAuthenticated()) {
+            return $redirect;
         }
+        
+        return view('auth.loginView');
     }
 
     public function login(Request $request)
     {
-        $request->validate([
+        // Redirect if already logged in
+        if ($redirect = $this->redirectIfAuthenticated()) {
+            return $redirect;
+        }
+
+        $validator = Validator::make($request->all(), [
             'email' => 'required|email',
-            'password' => 'required',
+            'password' => 'required|string|min:6',
         ]);
 
-        $checkUser = User::where('email', $request->email)->first();
-
-        if ($checkUser && Hash::check($request->password, $checkUser->password)) {
-            Auth::login($checkUser);  // Login only after successful password check
-            return redirect('/home');
-        } else {
-            return redirect('/login')->withErrors([
-                'login' => 'Invalid email or password.'
-            ])->withInput();
+        if ($validator->fails()) {
+            return back()->withErrors($validator)->withInput();
         }
+
+        $user = User::authenticate($request->email, $request->password);
+
+        if ($user) {
+            $user->login();
+            return redirect()->intended(route('expenses.index'))->with('success', 'Welcome back!');
+        }
+
+        return back()->withErrors([
+            'email' => 'The provided credentials do not match our records.',
+        ])->withInput();
     }
 
+    public function showRegisterForm()
+    {
+        // Redirect if already logged in
+        if ($redirect = $this->redirectIfAuthenticated()) {
+            return $redirect;
+        }
+        
+        return view('auth.registrationView');
+    }
+
+    public function register(Request $request)
+    {
+        // Redirect if already logged in
+        if ($redirect = $this->redirectIfAuthenticated()) {
+            return $redirect;
+        }
+
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|string|max:255',
+            'email' => 'required|string|email|max:255|unique:users',
+            'password' => 'required|string|min:6|confirmed',
+        ]);
+
+        if ($validator->fails()) {
+            return back()->withErrors($validator)->withInput();
+        }
+
+        $user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => $request->password, // Will be hashed by the model
+            'currency' => 'PHP',
+        ]);
+
+        $user->login();
+
+        return redirect()->route('expenses.index')->with('success', 'Account created successfully! Welcome to Expense Tracker!');
+    }
+
+    public function logout()
+    {
+        User::logout();
+        return redirect()->route('login')->with('success', 'You have been logged out successfully.');
+    }
 }

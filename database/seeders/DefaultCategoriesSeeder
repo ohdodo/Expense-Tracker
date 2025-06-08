@@ -1,0 +1,38 @@
+<?php
+
+namespace Database\Seeders;
+
+use Illuminate\Database\Seeder;
+use App\Models\Category;
+
+class DefaultCategoriesSeeder extends Seeder
+{
+    /**
+     * Run the database seeder.
+     */
+    public function run(): void
+    {
+        $defaultCategories = [
+            ['name' => 'Transportation', 'color' => '#EF4444', 'icon' => '🚗'],
+            ['name' => 'Food', 'color' => '#F59E0B', 'icon' => '🍔'],
+            ['name' => 'Bills', 'color' => '#DC2626', 'icon' => '📄'],
+            ['name' => 'School', 'color' => '#3B82F6', 'icon' => '🎓'],
+            ['name' => 'Miscellaneous', 'color' => '#6B7280', 'icon' => '📦'],
+            ['name' => 'Entertainment', 'color' => '#8B5CF6', 'icon' => '🎬'],
+            ['name' => 'Healthcare', 'color' => '#10B981', 'icon' => '🏥'],
+            ['name' => 'Shopping', 'color' => '#F97316', 'icon' => '🛍️'],
+            ['name' => 'Utilities', 'color' => '#0EA5E9', 'icon' => '⚡'],
+            ['name' => 'Insurance', 'color' => '#6366F1', 'icon' => '🛡️'],
+        ];
+
+        foreach ($defaultCategories as $category) {
+            Category::create([
+                'user_id' => null, // Default categories don't belong to specific users
+                'name' => $category['name'],
+                'color' => $category['color'],
+                'icon' => $category['icon'],
+                'is_default' => true,
+            ]);
+        }
+    }
+}
