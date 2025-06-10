@@ -50,15 +50,18 @@ class BudgetController extends Controller
             ? Carbon::now()->endOfMonth()
             : Carbon::now()->endOfYear();
 
-        Budget::create([
+        $budget = Budget::create([
             'user_id' => $currentUser->id,
             'category_id' => $request->category_id,
-            'name' => $request->name,  // This was missing!
+            'name' => $request->name,
             'amount' => $request->amount,
             'period' => $request->period,
             'start_date' => $startDate,
             'end_date' => $endDate,
         ]);
+
+        // Create notification for new budget
+        \App\Models\Notification::createBudgetCreated($currentUser->id, $budget);
 
         return redirect()->route('budgets.index')->with('success', 'Budget created successfully!');
     }

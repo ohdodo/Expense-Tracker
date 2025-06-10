@@ -3,21 +3,20 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Hash;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
 
-class User extends Model
+class User extends Authenticatable
 {
-    use HasFactory;
+    use HasFactory, Notifiable;
 
     protected $fillable = [
         'name',
         'email',
         'password',
-        'phone',
-        'profile_picture',
         'currency',
         'monthly_budget',
+        'profile_picture',
     ];
 
     protected $hidden = [
@@ -30,122 +29,191 @@ class User extends Model
         'monthly_budget' => 'decimal:2',
     ];
 
-    // Automatically hash password when setting
-    public function setPasswordAttribute($password)
-    {
-        $this->attributes['password'] = Hash::make($password);
-    }
-
-    // Custom authentication method
-    public static function authenticate($email, $password)
-    {
-        $user = static::where('email', $email)->first();
-
-        if ($user && Hash::check($password, $user->password)) {
-            return $user;
-        }
-
-        return null;
-    }
-
-    // Login user by setting session
-    public function login()
-    {
-        session(['user_id' => $this->id]);
-        session(['user_email' => $this->email]);
-        session(['user_name' => $this->name]);
-        
-        // Debug log
-        \Log::info('User login - Session set:', [
-            'user_id' => $this->id,
-            'session_id' => session()->getId()
-        ]);
-    }
-
-    // Logout user by clearing session
-    public static function logout()
-    {
-        // Debug log before logout
-        \Log::info('User logout - Before clearing session:', [
-            'user_id' => session('user_id'),
-            'session_id' => session()->getId()
-        ]);
-        
-        session()->forget(['user_id', 'user_email', 'user_name']);
-        session()->flush();
-        
-        // Debug log after logout
-        \Log::info('User logout - After clearing session:', [
-            'session_id' => session()->getId()
-        ]);
-    }
-
-    // Check if user is logged in
-    public static function isLoggedIn()
-    {
-        $isLoggedIn = session()->has('user_id') && session('user_id') !== null;
-        
-        // Debug log
-        \Log::info('User isLoggedIn check:', [
-            'result' => $isLoggedIn,
-            'user_id' => session('user_id'),
-            'session_id' => session()->getId()
-        ]);
-        
-        return $isLoggedIn;
-    }
-
-    // Get current logged in user
-    public static function getCurrentUser()
-    {
-        if (!static::isLoggedIn()) {
-            \Log::info('getCurrentUser: Not logged in');
-            return null;
-        }
-
-        $userId = session('user_id');
-        $user = static::find($userId);
-        
-        // Debug log
-        \Log::info('getCurrentUser result:', [
-            'user_id' => $userId,
-            'found' => $user ? true : false
-        ]);
-        
-        return $user;
-    }
-
-    // Get currency symbol
-    public function getCurrencySymbol()
-    {
-        $symbols = [
-            'PHP' => '₱',
-            'USD' => '$',
-            'EUR' => '€',
-            'GBP' => '£',
-        ];
-
-        return $symbols[$this->currency] ?? '₱';
-    }
-
-    // Relationships
+    /**
+     * Get the expenses for the user.
+     */
     public function expenses()
     {
         return $this->hasMany(Expense::class);
     }
 
+    /**
+     * Get the budgets for the user.
+     */
     public function budgets()
     {
         return $this->hasMany(Budget::class);
     }
 
+    /**
+     * Get the categories for the user.
+     */
     public function categories()
     {
         return $this->hasMany(Category::class);
     }
 
+    /**
+     * Get the notifications for the user.
+     */
     public function notifications()
     {
         return $this->hasMany(Notification::class);
+    }
+
+    /**
+     * Get the currency symbol for the user
+     */
+    public function getCurrencySymbol()
+    {
+        $symbols = [
+            'USD' => '$',
+            'EUR' => '€',
+            'GBP' => '£',
+            'JPY' => '¥',
+            'PHP' => '₱',
+        ];
+
+        return $symbols[$this->currency ?? 'USD'] ?? '$';
+    }
+
+    /**
+     * Get user initials for avatar
+     */
+    public function getInitials()
+    {
+        $names = explode(' ', trim($this->name));
+        $initials = '';
+        
+        foreach ($names as $name) {
+            if (!empty($name)) {
+                $initials .= strtoupper(substr($name, 0, 1));
+            }
+        }
+        
+        return !empty($initials) ? substr($initials, 0, 2) : 'U';
+    }
+
+    /**
+     * Check if user is logged in
+     */
+    public static function isLoggedIn()
+    {
+        return session()->has('user_id') && session()->has('user_email');
+    }
+
+    /**
+     * Get current logged in user
+     */
+    public static function getCurrentUser()
+    {
+        if (!self::isLoggedIn()) {
+            return null;
+        }
+
+        return self::where('id', session('user_id'))
+                  ->where('email', session('user_email'))
+                  ->first();
+    }
+
+    /**
+     * Log out the current user
+     */
+    public static function logout()
+    {
+        session()->forget(['user_id', 'user_email']);
+        session()->regenerate();
+        return true;
+    }
+
+    /**
+     * Get monthly budget progress
+     */
+    public function getMonthlyBudgetProgress()
+    {
+        if (!$this->monthly_budget) {
+            return null;
+        }
+
+        $currentMonthExpenses = $this->expenses()
+            ->whereMonth('date', now()->month)
+            ->whereYear('date', now()->year)
+            ->sum('amount');
+
+        return [
+            'budget' => $this->monthly_budget,
+            'spent' => $currentMonthExpenses,
+            'remaining' => $this->monthly_budget - $currentMonthExpenses,
+            'percentage' => ($currentMonthExpenses / $this->monthly_budget) * 100
+        ];
+    }
+
+    /**
+     * Get profile picture URL
+     */
+    public function getProfilePictureUrl()
+    {
+        if ($this->profile_picture && file_exists(public_path('storage/' . $this->profile_picture))) {
+            return asset('storage/' . $this->profile_picture);
+        }
+        
+        return null;
+    }
+
+    /**
+     * Check if user has a profile picture
+     */
+    public function hasProfilePicture()
+    {
+        return $this->profile_picture && file_exists(public_path('storage/' . $this->profile_picture));
+    }
+
+    /**
+     * Get formatted name for display
+     */
+    public function getDisplayName()
+    {
+        return $this->name ?: 'User';
+    }
+
+    /**
+     * Get total expenses for the user
+     */
+    public function getTotalExpenses()
+    {
+        return $this->expenses()->sum('amount');
+    }
+
+    /**
+     * Get current month expenses for the user
+     */
+    public function getCurrentMonthExpenses()
+    {
+        return $this->expenses()
+            ->whereMonth('date', now()->month)
+            ->whereYear('date', now()->year)
+            ->sum('amount');
+    }
+
+    /**
+     * Get active budgets count
+     */
+    public function getActiveBudgetsCount()
+    {
+        return $this->budgets()
+            ->where('is_active', true)
+            ->where('start_date', '<=', now())
+            ->where('end_date', '>=', now())
+            ->count();
+    }
+
+    /**
+     * Get unread notifications count
+     */
+    public function getUnreadNotificationsCount()
+    {
+        return $this->notifications()
+            ->where('is_read', false)
+            ->count();
     }
 }

@@ -17,14 +17,7 @@ class ProfileController extends Controller
 
         $currentUser = AuthController::getCurrentUser();
         
-        // Debug the user session
-        \Log::info('Profile Edit - Current User:', [
-            'user_id' => $currentUser ? $currentUser->id : 'null',
-            'session_user_id' => session('user_id'),
-            'session_data' => session()->all()
-        ]);
-        
-        if (!$currentUser) {
+        if (!$currentUser || !$currentUser->id) {
             return redirect()->route('login')->with('error', 'Session expired. Please login again.');
         }
 
@@ -40,35 +33,66 @@ class ProfileController extends Controller
 
         $currentUser = AuthController::getCurrentUser();
         
-        if (!$currentUser) {
+        if (!$currentUser || !$currentUser->id) {
             return redirect()->route('login')->with('error', 'Session expired. Please login again.');
         }
 
         $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users,email,' . $currentUser->id,
-            'phone' => 'nullable|string|max:20',
-            'profile_picture' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
-            'currency' => 'required|string|in:PHP,USD,EUR,GBP',
+            'currency' => 'nullable|string|max:10',
             'monthly_budget' => 'nullable|numeric|min:0',
+            'profile_picture' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // 2MB max
         ]);
 
-        $data = $request->only(['name', 'email', 'phone', 'currency', 'monthly_budget']);
+        $updateData = [
+            'name' => $request->name,
+            'email' => $request->email,
+            'currency' => $request->currency ?? 'USD',
+            'monthly_budget' => $request->monthly_budget,
+        ];
+
+        // Track changes for notification
+        $changes = [];
+        if ($currentUser->name !== $request->name) {
+            $changes[] = 'Name';
+        }
+        if ($currentUser->email !== $request->email) {
+            $changes[] = 'Email';
+        }
+        if ($currentUser->currency !== ($request->currency ?? 'USD')) {
+            $changes[] = 'Currency';
+        }
+        if ($currentUser->monthly_budget != $request->monthly_budget) {
+            $changes[] = 'Monthly Budget';
+        }
 
         // Handle profile picture upload
         if ($request->hasFile('profile_picture')) {
-            // Delete old profile picture if exists
-            if ($currentUser->profile_picture) {
+            // Delete old profile picture if it exists
+            if ($currentUser->profile_picture && Storage::disk('public')->exists($currentUser->profile_picture)) {
                 Storage::disk('public')->delete($currentUser->profile_picture);
             }
 
-            $path = $request->file('profile_picture')->store('profile_pictures', 'public');
-            $data['profile_picture'] = $path;
+            // Store new profile picture
+            $path = $request->file('profile_picture')->store('profile-pictures', 'public');
+            $updateData['profile_picture'] = $path;
+            $changes[] = 'Profile Picture';
+            
+            // Make sure storage link exists
+            if (!file_exists(public_path('storage'))) {
+                \Artisan::call('storage:link');
+            }
         }
 
-        $currentUser->update($data);
+        $currentUser->update($updateData);
 
-        return redirect()->route('profile.edit')->with('success', 'Profile updated successfully!');
+        // Create notification if there were changes
+        if (!empty($changes)) {
+            \App\Models\Notification::createProfileUpdated($currentUser->id, $changes);
+        }
+
+        return redirect()->route('profile.edit')->with('success', 'Profile updated successfully.');
     }
 
     public function updatePassword(Request $request)
@@ -80,23 +104,48 @@ class ProfileController extends Controller
 
         $currentUser = AuthController::getCurrentUser();
         
-        if (!$currentUser) {
+        if (!$currentUser || !$currentUser->id) {
             return redirect()->route('login')->with('error', 'Session expired. Please login again.');
         }
 
         $request->validate([
             'current_password' => 'required',
-            'new_password' => 'required|min:6|confirmed',
+            'new_password' => 'required|string|min:8|confirmed',
         ]);
 
+        // Check if current password is correct
         if (!Hash::check($request->current_password, $currentUser->password)) {
-            return back()->withErrors(['current_password' => 'The current password is incorrect.']);
+            return redirect()->back()->with('error', 'Current password is incorrect.');
         }
 
         $currentUser->update([
-            'password' => $request->new_password, // Will be hashed by the model
+            'password' => Hash::make($request->new_password),
         ]);
 
-        return redirect()->route('profile.edit')->with('success', 'Password changed successfully!');
+        return redirect()->route('profile.edit')->with('success', 'Password updated successfully.');
+    }
+
+    public function removeProfilePicture()
+    {
+        // Check authentication using AuthController
+        if ($redirect = AuthController::checkAuth()) {
+            return $redirect;
+        }
+
+        $currentUser = AuthController::getCurrentUser();
+        
+        if (!$currentUser || !$currentUser->id) {
+            return redirect()->route('login')->with('error', 'Session expired. Please login again.');
+        }
+
+        // Delete profile picture file if it exists
+        if ($currentUser->profile_picture && Storage::disk('public')->exists($currentUser->profile_picture)) {
+            Storage::disk('public')->delete($currentUser->profile_picture);
+        }
+
+        // Remove profile picture from database
+        $currentUser->update(['profile_picture' => null]);
+
+        return redirect()->route('profile.edit')->with('success', 'Profile picture removed successfully.');
     }
 }

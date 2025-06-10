@@ -13,6 +13,16 @@ use App\Http\Controllers\NotificationController;
 |--------------------------------------------------------------------------
 */
 
+// Route to create storage link (temporary, remove in production)
+Route::get('/create-storage-link', function () {
+    try {
+        \Artisan::call('storage:link');
+        return 'Storage link created successfully!';
+    } catch (\Exception $e) {
+        return 'Error creating storage link: ' . $e->getMessage();
+    }
+});
+
 // Test route for session debugging
 Route::get('/test-session', function () {
     // Set a test value
@@ -68,6 +78,7 @@ Route::post('/notifications/{notification}/mark-read', [NotificationController::
 Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
 Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
 Route::put('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password');
+Route::get('/profile/remove-picture', [ProfileController::class, 'removeProfilePicture'])->name('profile.remove-picture');
 
 // Alternative route names for compatibility
 Route::get('/home', [ExpenseController::class, 'index'])->name('home');

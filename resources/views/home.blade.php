@@ -3,6 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>Expense Tracker Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.x/dist/tailwind.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -89,6 +90,23 @@
         .budget-warning { background-color: #f59e0b; }
         .budget-danger { background-color: #ef4444; }
         .budget-success { background-color: #10b981; }
+        .chart-period-btn {
+            padding: 8px 16px;
+            border: 1px solid #d1d5db;
+            background: white;
+            color: #6b7280;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .chart-period-btn.active {
+            background: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+        }
+        .chart-period-btn:hover:not(.active) {
+            background: #f3f4f6;
+        }
     </style>
 </head>
 
@@ -172,11 +190,11 @@
                     <!-- User Dropdown -->
                     <div class="dropdown">
                         <button class="flex items-center space-x-2 bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-4 py-2 rounded-lg transition duration-200">
-                            @if($currentUser->profile_picture)
+                            @if($currentUser->profile_picture && file_exists(public_path('storage/' . $currentUser->profile_picture)))
                                 <img src="{{ asset('storage/' . $currentUser->profile_picture) }}" alt="Profile" class="w-8 h-8 rounded-full object-cover">
                             @else
                                 <div class="w-8 h-8 bg-white bg-opacity-30 rounded-full flex items-center justify-center">
-                                    <span class="text-sm font-medium">{{ substr($currentUser->name, 0, 1) }}</span>
+                                    <span class="text-sm font-medium">{{ $currentUser->getInitials() }}</span>
                                 </div>
                             @endif
                             <span class="font-medium">{{ $currentUser->name }}</span>
@@ -226,6 +244,58 @@
             </div>
         @endif
 
+        <!-- Monthly Budget Overview (if set) -->
+        @if($monthlyBudgetData)
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-8">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-gray-800 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                        </svg>
+                        Monthly Budget - {{ now()->format('F Y') }}
+                    </h2>
+                    <a href="{{ route('profile.edit') }}" class="text-blue-600 hover:text-blue-800 text-sm font-medium">Edit Budget</a>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="text-center">
+                        <p class="text-sm text-gray-600">Budget</p>
+                        <p class="text-2xl font-bold text-gray-800">{{ $currentUser->getCurrencySymbol() }}{{ number_format($monthlyBudgetData['budget'], 2) }}</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-sm text-gray-600">Spent</p>
+                        <p class="text-2xl font-bold text-red-600">{{ $currentUser->getCurrencySymbol() }}{{ number_format($monthlyBudgetData['spent'], 2) }}</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-sm text-gray-600">Remaining</p>
+                        <p class="text-2xl font-bold {{ $monthlyBudgetData['remaining'] >= 0 ? 'text-green-600' : 'text-red-600' }}">
+                            {{ $currentUser->getCurrencySymbol() }}{{ number_format($monthlyBudgetData['remaining'], 2) }}
+                        </p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-sm text-gray-600">Usage</p>
+                        <p class="text-2xl font-bold {{ $monthlyBudgetData['percentage'] >= 100 ? 'text-red-600' : ($monthlyBudgetData['percentage'] >= 80 ? 'text-yellow-600' : 'text-green-600') }}">
+                            {{ number_format($monthlyBudgetData['percentage'], 1) }}%
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="mt-4">
+                    @php
+                        $progressClass = $monthlyBudgetData['percentage'] >= 100 ? 'budget-danger' : ($monthlyBudgetData['percentage'] >= 80 ? 'budget-warning' : 'budget-success');
+                    @endphp
+                    <div class="budget-progress">
+                        <div class="budget-progress-bar {{ $progressClass }}" style="width: {{ min($monthlyBudgetData['percentage'], 100) }}%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>0%</span>
+                        <span>{{ number_format($monthlyBudgetData['percentage'], 1) }}% used</span>
+                        <span>100%</span>
+                    </div>
+                </div>
+            </div>
+        @endif
+
         <!-- Budget Overview Section -->
         @if($budgets->count() > 0)
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-8">
@@ -234,7 +304,7 @@
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                         </svg>
-                        Budget Overview
+                        Category Budgets
                     </h2>
                     <a href="{{ route('budgets.index') }}" class="text-blue-600 hover:text-blue-800 text-sm font-medium">Manage Budgets</a>
                 </div>
@@ -353,17 +423,24 @@
                 </div>
             </div>
 
-            <!-- Monthly Trend Line Chart -->
+            <!-- Time-based Trend Chart -->
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                <h3 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4" />
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
-                    </svg>
-                    Monthly Spending Trend
-                </h3>
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold text-gray-800 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+                        </svg>
+                        Spending Trend
+                    </h3>
+                    <div class="flex space-x-1">
+                        <button onclick="changeChartPeriod('daily')" class="chart-period-btn {{ $chartPeriod === 'daily' ? 'active' : '' }}" id="btn-daily">Daily</button>
+                        <button onclick="changeChartPeriod('weekly')" class="chart-period-btn {{ $chartPeriod === 'weekly' ? 'active' : '' }}" id="btn-weekly">Weekly</button>
+                        <button onclick="changeChartPeriod('monthly')" class="chart-period-btn {{ $chartPeriod === 'monthly' ? 'active' : '' }}" id="btn-monthly">Monthly</button>
+                    </div>
+                </div>
                 <div class="relative h-64">
-                    <canvas id="monthlyChart"></canvas>
+                    <canvas id="timeChart"></canvas>
                 </div>
             </div>
         </div>
@@ -542,7 +619,7 @@
     <script>
         // Chart.js configurations
         const categoryData = @json($categoryData);
-        const monthlyData = @json($monthlyData);
+        const monthlyData = @json($monthlyData);  // Changed from timeData to monthlyData
 
         // Category Pie Chart
         if (Object.keys(categoryData).length > 0) {
@@ -577,15 +654,15 @@
             });
         }
 
-        // Monthly Line Chart
-        const monthlyCtx = document.getElementById('monthlyChart').getContext('2d');
-        new Chart(monthlyCtx, {
+        // Time-based Line Chart
+        const timeCtx = document.getElementById('timeChart').getContext('2d');
+        let timeChart = new Chart(timeCtx, {
             type: 'line',
             data: {
-                labels: Object.keys(monthlyData),
+                labels: Object.keys(monthlyData),  // Changed from timeData to monthlyData
                 datasets: [{
-                    label: 'Monthly Expenses',
-                    data: Object.values(monthlyData),
+                    label: 'Expenses',
+                    data: Object.values(monthlyData),  // Changed from timeData to monthlyData
                     borderColor: '#36A2EB',
                     backgroundColor: 'rgba(54, 162, 235, 0.1)',
                     borderWidth: 3,
@@ -621,6 +698,20 @@
             }
         });
 
+        // Chart period change function
+        function changeChartPeriod(period) {
+            // Update button states
+            document.querySelectorAll('.chart-period-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById('btn-' + period).classList.add('active');
+
+            // Reload page with new period
+            const url = new URL(window.location);
+            url.searchParams.set('chart_period', period);
+            window.location.href = url.toString();
+        }
+
         // Notification functions
         function toggleNotifications() {
             const dropdown = document.getElementById('notificationsDropdown');
@@ -628,18 +719,33 @@
         }
 
         function markAllAsRead() {
+            // Get CSRF token from meta tag or directly from Laravel's JavaScript variable
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '{{ csrf_token() }}';
+            
             fetch('/notifications/mark-all-read', {
                 method: 'POST',
                 headers: {
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+                    'X-CSRF-TOKEN': csrfToken,
                     'Content-Type': 'application/json',
+                    'Accept': 'application/json',
                 },
+                credentials: 'same-origin'
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
             .then(data => {
                 if (data.success) {
                     location.reload();
+                } else {
+                    console.error('Failed to mark notifications as read');
                 }
+            })
+            .catch(error => {
+                console.error('Error:', error);
             });
         }
 

@@ -70,7 +70,7 @@ class ExpenseController extends Controller
             ->limit(5)
             ->get();
 
-        // Prepare data for category pie chart - using category relationship with proper table prefixes
+        // Prepare data for category pie chart
         $categoryData = Expense::where('expenses.user_id', $currentUser->id)
             ->join('categories', 'expenses.category_id', '=', 'categories.id')
             ->selectRaw('categories.name as category_name, SUM(expenses.amount) as total')
@@ -78,35 +78,99 @@ class ExpenseController extends Controller
             ->pluck('total', 'category_name')
             ->toArray();
 
-        // Prepare data for monthly line chart (last 12 months)
-        $monthlyData = [];
-        $startDate = Carbon::now()->subMonths(11)->startOfMonth();
+        // Get chart period from request (default to monthly)
+        $chartPeriod = $request->get('chart_period', 'monthly');
         
-        for ($i = 0; $i < 12; $i++) {
-            $currentMonth = $startDate->copy()->addMonths($i);
-            $monthLabel = $currentMonth->format('M Y');
-            
-            $total = Expense::where('user_id', $currentUser->id)
-                ->whereYear('date', $currentMonth->year)
-                ->whereMonth('date', $currentMonth->month)
-                ->sum('amount');
-                
-            $monthlyData[$monthLabel] = (float) $total;
-        }
+        // Prepare data for time-based line chart
+        $monthlyData = $this->getTimeBasedData($currentUser->id, $chartPeriod);
 
         // Get all expenses for calculations
         $allExpenses = Expense::where('user_id', $currentUser->id)->get();
+
+        // Calculate monthly budget progress if user has set a monthly budget
+        $monthlyBudgetData = null;
+        if ($currentUser->monthly_budget) {
+            $currentMonthExpenses = Expense::where('user_id', $currentUser->id)
+                ->whereMonth('date', Carbon::now()->month)
+                ->whereYear('date', Carbon::now()->year)
+                ->sum('amount');
+            
+            $monthlyBudgetData = [
+                'budget' => $currentUser->monthly_budget,
+                'spent' => $currentMonthExpenses,
+                'remaining' => $currentUser->monthly_budget - $currentMonthExpenses,
+                'percentage' => ($currentMonthExpenses / $currentUser->monthly_budget) * 100
+            ];
+        }
 
         return view('home', compact(
             'expenses', 
             'categories', 
             'categoryData', 
-            'monthlyData', 
+            'monthlyData',
+            'chartPeriod',
             'allExpenses', 
             'currentUser',
             'budgets',
-            'notifications'
+            'notifications',
+            'monthlyBudgetData'
         ));
+    }
+
+    private function getTimeBasedData($userId, $period)
+    {
+        $data = [];
+        
+        switch ($period) {
+            case 'daily':
+                // Last 30 days
+                for ($i = 29; $i >= 0; $i--) {
+                    $date = Carbon::now()->subDays($i);
+                    $label = $date->format('M d');
+                    
+                    $total = Expense::where('user_id', $userId)
+                        ->whereDate('date', $date)
+                        ->sum('amount');
+                        
+                    $data[$label] = (float) $total;
+                }
+                break;
+                
+            case 'weekly':
+                // Last 12 weeks
+                for ($i = 11; $i >= 0; $i--) {
+                    $startOfWeek = Carbon::now()->subWeeks($i)->startOfWeek();
+                    $endOfWeek = Carbon::now()->subWeeks($i)->endOfWeek();
+                    $label = $startOfWeek->format('M d') . ' - ' . $endOfWeek->format('M d');
+                    
+                    $total = Expense::where('user_id', $userId)
+                        ->whereBetween('date', [$startOfWeek, $endOfWeek])
+                        ->sum('amount');
+                        
+                    $data[$label] = (float) $total;
+                }
+                break;
+                
+            case 'monthly':
+            default:
+                // Last 12 months
+                $startDate = Carbon::now()->subMonths(11)->startOfMonth();
+                
+                for ($i = 0; $i < 12; $i++) {
+                    $currentMonth = $startDate->copy()->addMonths($i);
+                    $label = $currentMonth->format('M Y');
+                    
+                    $total = Expense::where('user_id', $userId)
+                        ->whereYear('date', $currentMonth->year)
+                        ->whereMonth('date', $currentMonth->month)
+                        ->sum('amount');
+                        
+                    $data[$label] = (float) $total;
+                }
+                break;
+        }
+        
+        return $data;
     }
 
     public function store(Request $request)
@@ -148,6 +212,9 @@ class ExpenseController extends Controller
             'date' => $request->date,
             'description' => $request->description,
         ]);
+
+        // Create notification for new expense
+        Notification::createExpenseAdded($currentUser->id, $expense);
 
         // Check budget limits after adding expense
         $this->checkBudgetLimits($currentUser->id, $request->category_id, $request->amount);
@@ -232,6 +299,9 @@ class ExpenseController extends Controller
             'description' => $request->description,
         ]);
 
+        // Create notification for updated expense
+        Notification::createExpenseUpdated($currentUser->id, $expense, $oldAmount);
+
         // Check budget limits if amount or category changed
         if ($oldAmount != $request->amount || $oldCategoryId != $request->category_id) {
             $this->checkBudgetLimits($currentUser->id, $request->category_id);
@@ -261,7 +331,14 @@ class ExpenseController extends Controller
             return redirect()->route('expenses.index')->with('error', 'Expense not found.');
         }
 
+        // Store data for notification before deleting
+        $amount = $expense->amount;
+        $categoryName = $expense->category ? $expense->category->name : 'Uncategorized';
+
         $expense->delete();
+
+        // Create notification for deleted expense
+        Notification::createExpenseDeleted($currentUser->id, $amount, $categoryName);
 
         return redirect()->route('expenses.index')->with('success', 'Expense deleted successfully.');
     }
@@ -288,7 +365,7 @@ class ExpenseController extends Controller
             // Check for budget warnings (80% threshold)
             if ($percentage >= 80 && $percentage < 100) {
                 $existingNotification = Notification::where('user_id', $userId)
-                    ->where('type', Notification::TYPE_BUDGET_WARNING)
+                    ->where('type', 'budget_warning')
                     ->whereJsonContains('data->budget_id', $budget->id)
                     ->where('created_at', '>=', $budget->start_date)
                     ->first();
@@ -301,7 +378,7 @@ class ExpenseController extends Controller
             // Check for budget exceeded (100% threshold)
             if ($percentage >= 100) {
                 $existingNotification = Notification::where('user_id', $userId)
-                    ->where('type', Notification::TYPE_BUDGET_EXCEEDED)
+                    ->where('type', 'budget_exceeded')
                     ->whereJsonContains('data->budget_id', $budget->id)
                     ->where('created_at', '>=', $budget->start_date)
                     ->first();

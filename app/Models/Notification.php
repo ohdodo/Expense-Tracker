@@ -9,17 +9,21 @@ class Notification extends Model
 {
     use HasFactory;
 
-    // Notification types constants
+    // Add these constants at the top of the class
     const TYPE_BUDGET_WARNING = 'budget_warning';
     const TYPE_BUDGET_EXCEEDED = 'budget_exceeded';
+    const TYPE_PROFILE_UPDATED = 'profile_updated';
     const TYPE_EXPENSE_ADDED = 'expense_added';
+    const TYPE_EXPENSE_UPDATED = 'expense_updated';
+    const TYPE_EXPENSE_DELETED = 'expense_deleted';
     const TYPE_BUDGET_CREATED = 'budget_created';
+    const TYPE_BUDGET_UPDATED = 'budget_updated';
 
     protected $fillable = [
-        'user_id',
+        'user_id',  // This was missing!
         'type',
-        'title',
-        'message',
+        'title',    // This was missing!
+        'message',  // This was missing!
         'data',
         'is_read',
         'read_at',
@@ -56,14 +60,6 @@ class Notification extends Model
     }
 
     /**
-     * Scope to filter by type
-     */
-    public function scopeOfType($query, $type)
-    {
-        return $query->where('type', $type);
-    }
-
-    /**
      * Mark notification as read
      */
     public function markAsRead()
@@ -86,6 +82,22 @@ class Notification extends Model
     }
 
     /**
+     * Get the decoded data attribute
+     */
+    public function getDataAttribute($value)
+    {
+        return $value ? json_decode($value, true) : [];
+    }
+
+    /**
+     * Set the data attribute
+     */
+    public function setDataAttribute($value)
+    {
+        $this->attributes['data'] = is_array($value) ? json_encode($value) : $value;
+    }
+
+    /**
      * Create a budget warning notification
      */
     public static function createBudgetWarning($userId, $budget, $percentage)
@@ -95,7 +107,7 @@ class Notification extends Model
             'type' => self::TYPE_BUDGET_WARNING,
             'title' => 'Budget Warning',
             'message' => "You've used " . number_format($percentage, 1) . "% of your '{$budget->name}' budget.",
-            'data' => ['budget_id' => $budget->id, 'percentage' => $percentage],
+            'data' => ['budget_id' => $budget->id],
             'is_read' => false,
         ]);
     }
@@ -110,7 +122,27 @@ class Notification extends Model
             'type' => self::TYPE_BUDGET_EXCEEDED,
             'title' => 'Budget Exceeded',
             'message' => "You've exceeded your '{$budget->name}' budget by $" . number_format($overAmount, 2) . ".",
-            'data' => ['budget_id' => $budget->id, 'over_amount' => $overAmount],
+            'data' => ['budget_id' => $budget->id],
+            'is_read' => false,
+        ]);
+    }
+
+    /**
+     * Create a profile updated notification
+     */
+    public static function createProfileUpdated($userId, $changes = [])
+    {
+        $changeText = '';
+        if (!empty($changes)) {
+            $changeText = ' Changes: ' . implode(', ', $changes);
+        }
+
+        return self::create([
+            'user_id' => $userId,
+            'type' => self::TYPE_PROFILE_UPDATED,
+            'title' => 'Profile Updated',
+            'message' => 'Your profile has been successfully updated.' . $changeText,
+            'data' => ['changes' => $changes],
             'is_read' => false,
         ]);
     }
@@ -124,8 +156,43 @@ class Notification extends Model
             'user_id' => $userId,
             'type' => self::TYPE_EXPENSE_ADDED,
             'title' => 'Expense Added',
-            'message' => "New expense of $" . number_format($expense->amount, 2) . " added to " . ($expense->category ? $expense->category->name : 'Uncategorized'),
+            'message' => "New expense of $" . number_format($expense->amount, 2) . " added for " . ($expense->category ? $expense->category->name : 'Uncategorized'),
             'data' => ['expense_id' => $expense->id],
+            'is_read' => false,
+        ]);
+    }
+
+    /**
+     * Create an expense updated notification
+     */
+    public static function createExpenseUpdated($userId, $expense, $oldAmount = null)
+    {
+        $message = "Expense updated";
+        if ($oldAmount && $oldAmount != $expense->amount) {
+            $message .= " - amount changed from $" . number_format($oldAmount, 2) . " to $" . number_format($expense->amount, 2);
+        }
+
+        return self::create([
+            'user_id' => $userId,
+            'type' => self::TYPE_EXPENSE_UPDATED,
+            'title' => 'Expense Updated',
+            'message' => $message,
+            'data' => ['expense_id' => $expense->id],
+            'is_read' => false,
+        ]);
+    }
+
+    /**
+     * Create an expense deleted notification
+     */
+    public static function createExpenseDeleted($userId, $amount, $categoryName)
+    {
+        return self::create([
+            'user_id' => $userId,
+            'type' => self::TYPE_EXPENSE_DELETED,
+            'title' => 'Expense Deleted',
+            'message' => "Expense of $" . number_format($amount, 2) . " from " . $categoryName . " has been deleted",
+            'data' => [],
             'is_read' => false,
         ]);
     }
@@ -143,43 +210,5 @@ class Notification extends Model
             'data' => ['budget_id' => $budget->id],
             'is_read' => false,
         ]);
-    }
-
-    /**
-     * Get notification icon based on type
-     */
-    public function getIconAttribute()
-    {
-        switch ($this->type) {
-            case self::TYPE_BUDGET_WARNING:
-                return '⚠️';
-            case self::TYPE_BUDGET_EXCEEDED:
-                return '🚨';
-            case self::TYPE_EXPENSE_ADDED:
-                return '💰';
-            case self::TYPE_BUDGET_CREATED:
-                return '📊';
-            default:
-                return '📢';
-        }
-    }
-
-    /**
-     * Get notification color based on type
-     */
-    public function getColorAttribute()
-    {
-        switch ($this->type) {
-            case self::TYPE_BUDGET_WARNING:
-                return 'yellow';
-            case self::TYPE_BUDGET_EXCEEDED:
-                return 'red';
-            case self::TYPE_EXPENSE_ADDED:
-                return 'blue';
-            case self::TYPE_BUDGET_CREATED:
-                return 'green';
-            default:
-                return 'gray';
-        }
     }
 }
